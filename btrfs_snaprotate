@@ -1,0 +1,135 @@
+#!/usr/bin/env python
+
+import getopt, sys
+import os, os.path
+import subprocess
+
+usage = """
+   btrfs-snaprotate [-l|--label=label] [-k|--keep=num] [-a|--after=command] [--dry-run]
+                    [-t|--target=dir] [--log=logspec] subvolume
+
+     subvolume - The subvolume to snapshot
+     --label - The prefix of the name of the snapshot. Every snapshot will be named label_YYYY_MM_DD_hh:mm:ss.
+               The default prefix is the name of the last component in the path of the subvolume being snapshot,
+               or root for root snapshots.
+     --keep - Number of most recent snapshots to keep.
+     --after - A command to run after the snapshot was taken. The command will be run under the default shell.
+               It will have the following environment variables defined:
+               SNAPSUBVOL - The subvolume that was snapshot
+               SNAPTARGET - The directory in which the snapshots are stored
+               SNAPRECENT - The most recent snapshot
+
+     --target - The directory in which the snapshots are stored (mounted). Defaults to <subvolume>/.snapshot.
+                Must reside inside the volume being snapshot.
+     --log - Specifies how the actions are being logged (TBD)
+"""
+
+default_options = {
+  "label": None,       # Dynamically determined
+  "keep": 7,
+  "after": None,
+  "dry": False,
+  "target": ".snapshot",
+  "log": "TBD",
+  "subvolume": None
+}
+
+class OptionsError(Exception):
+  def __init__(self, message):
+    super(OptionsError, self).__init__(message)
+
+class btrfs_util:
+  def __init__(self, btrfs_exe = None):
+    if btrfs_exe is not None:
+      self.btrfs = btrfs_exe
+    else:
+      self.btrfs = self.which("btrfs")
+
+    if self.btrfs is None:
+        raise Exception("Could not find btrfs executable")
+
+  def which(self, exename):
+    # Find the an executable in the path
+    for path in os.environ["PATH"].split(os.pathsep):
+      path = path.strip('"')
+      exe = os.path.join(path, exename)
+      if os.path.isfile(exe) and os.access(exe, os.X_OK):
+        return exe
+
+    # Not found
+    return None
+
+  def exec_btrfs_util(self, arguments):
+    btrfs_proc = subprocess.Popen([self.btrfs] + [arguments])
+    (stdout, stderr) = btrfs_proc.communicate()
+    return (btrfs_proc.returncode, stdout, stderr)
+
+  def create_snapshot(self, subvol, dest):
+    pass
+
+  def delete_snapshot(self, snapname):
+    pass
+
+  def validate_is_btrfs(self, dir):
+    pass
+
+  def btrfs_util_version(self):
+    (ec, stdout, stderr) = self.exec_btrfs_util(['version'])
+    print stdout
+
+
+def parse_command_line(args):
+  short_options = "l:k:a:t:"
+  long_options = [ "label=", "keep=", "after=", "dry-run", "target=", "log=" ]
+
+  # Parse the command line
+  try:
+    opts, pargs = getopt.getopt(args, short_options, long_options)
+  except getopt.GetoptError as err:
+    raise OptionsError(str(err))
+
+  options = default_options.copy()
+  for op, value in opts:
+    if op in ("-l", "--label"):
+	options["label"] = value
+
+    elif op in ("-k", "--keep"):
+      try:
+        options["keep"] = int(value)
+        if (options["keep"] < 1) or (options["keep"] > 500):
+          raise ValueError()
+      except ValueError:
+        raise OptionsError("Keep value must be an integer between 1-500")
+
+    elif op in ("-a", "--after"):
+      options["after"] = value
+
+    elif op == "--dry-run":
+      options["dry"] = True
+
+    elif op in ("-t", "--target"):
+      options["target"] = value
+
+  # Handle the (single) positional argument
+  if len(pargs) != 1:
+    raise OptionsError("Must specify exactly one subvolume to snapshot")
+  options["subvolume"] = pargs[0]
+
+  return options
+
+#####
+##### Main
+#####
+if __name__ == "__main__":
+  try:
+    options = parse_command_line(sys.argv[1:])
+  except OptionsError as err:
+    print "ERROR: %s" % str(err)
+    print usage
+    sys.exit(1)
+
+  # Check that the given subvolume is a btrfs subvolume
+
+  print options
+  btrfs = btrfs_util()
+  btrfs.btrfs_util_version()
