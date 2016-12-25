@@ -3,10 +3,11 @@
 import getopt, sys
 import os, os.path
 import subprocess
+import logging, re
 
 usage = """
    btrfs-snaprotate [-l|--label=label] [-k|--keep=num] [-a|--after=command] [--dry-run]
-                    [-t|--target=dir] [--log=logspec] subvolume
+                    [-t|--target=dir] [--log=logspec] [-v] subvolume
 
      subvolume - The subvolume to snapshot
      --label - The prefix of the name of the snapshot. Every snapshot will be named label_YYYY_MM_DD_hh:mm:ss.
@@ -21,7 +22,7 @@ usage = """
 
      --target - The directory in which the snapshots are stored (mounted). Defaults to <subvolume>/.snapshot.
                 Must reside inside the volume being snapshot.
-     --log - Specifies how the actions are being logged (TBD)
+     -v - Verbose output
 """
 
 default_options = {
@@ -31,7 +32,8 @@ default_options = {
   "dry": False,
   "target": ".snapshot",
   "log": "TBD",
-  "subvolume": None
+  "subvolume": None,
+  "verbose": False
 }
 
 class OptionsError(Exception):
@@ -41,11 +43,11 @@ class OptionsError(Exception):
 class btrfs_util:
   def __init__(self, btrfs_exe = None):
     if btrfs_exe is not None:
-      self.btrfs = btrfs_exe
+      self.btrfs_exe = btrfs_exe
     else:
-      self.btrfs = self.which("btrfs")
+      self.btrfs_exe = self.which("btrfs")
 
-    if self.btrfs is None:
+    if self.btrfs_exe is None:
         raise Exception("Could not find btrfs executable")
 
   def which(self, exename):
@@ -60,8 +62,13 @@ class btrfs_util:
     return None
 
   def exec_btrfs_util(self, arguments):
-    btrfs_proc = subprocess.Popen([self.btrfs] + [arguments])
+    cmd = [self.btrfs_exe] + arguments
+    logging.debug('Executing: ' + ' '.join(cmd))
+    btrfs_proc = subprocess.Popen([self.btrfs_exe] + arguments,
+        stdout = subprocess.PIPE, stderr = subprocess.PIPE)
     (stdout, stderr) = btrfs_proc.communicate()
+    logging.debug('btrfs finised with return code %d' % btrfs_proc.returncode)
+
     return (btrfs_proc.returncode, stdout, stderr)
 
   def create_snapshot(self, subvol, dest):
@@ -74,12 +81,28 @@ class btrfs_util:
     pass
 
   def btrfs_util_version(self):
-    (ec, stdout, stderr) = self.exec_btrfs_util(['version'])
-    print stdout
+      # Exepect a return string looking like this
+      ver_string = re.compile(r"btrfs-progs v([0-9]+\.[0-9]+)")
+
+      # Execute btrfs to get the version
+      ec, stdout, stderr = self.exec_btrfs_util(['version'])
+
+      # Check the return code and the version string
+      if ec != 0:
+          # Problem executing the util
+          return None
+
+      v = ver_string.match(stdout)
+      if v is None:
+          # Malformed version string
+          return None
+
+      # This is the version extracted
+      return v.groups()[0]
 
 
 def parse_command_line(args):
-  short_options = "l:k:a:t:"
+  short_options = "l:k:a:t:v"
   long_options = [ "label=", "keep=", "after=", "dry-run", "target=", "log=" ]
 
   # Parse the command line
@@ -110,10 +133,24 @@ def parse_command_line(args):
     elif op in ("-t", "--target"):
       options["target"] = value
 
+    elif op == "-v":
+       options["verbose"] = True
+
   # Handle the (single) positional argument
   if len(pargs) != 1:
     raise OptionsError("Must specify exactly one subvolume to snapshot")
   options["subvolume"] = pargs[0]
+
+  if options["verbose"]:
+    logging.getLogger().setLevel(logging.DEBUG)
+
+  logging.debug("Exec arguments: Subvolume = %s" % options["subvolume"])
+  logging.debug("Exec arguments: Label = %s" % options["label"])
+  logging.debug("Exec arguments: Keep = %d" % options["keep"])
+  if options["after"] is not None:
+      logging.debug("Exec arguments: Keep = %s" % options["after"])
+  logging.debug("Exec arguments: Dry Run = %s" % ("Yes" if options["dry"] else "No"))
+  logging.debug("Exec arguments: Target = %s" % options["target"])
 
   return options
 
@@ -121,15 +158,21 @@ def parse_command_line(args):
 ##### Main
 #####
 if __name__ == "__main__":
+  # Set up logger
+  logging.basicConfig(format = "%(asctime)s [%(levelname)s] %(message)s")
+
   try:
     options = parse_command_line(sys.argv[1:])
   except OptionsError as err:
-    print "ERROR: %s" % str(err)
-    print usage
+    logging.critical(str(err))
+    sys.stderr.write(usage)
     sys.exit(1)
 
   # Check that the given subvolume is a btrfs subvolume
-
-  print options
   btrfs = btrfs_util()
-  btrfs.btrfs_util_version()
+  btrfs_ver = btrfs.btrfs_util_version()
+  if btrfs_ver is None:
+      logging.critical("Failed getting btrfs version")
+      sys.exit(1)
+  else:
+      logging.debug("btrfs version: %s" % btrfs_ver)
