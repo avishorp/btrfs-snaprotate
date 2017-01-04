@@ -36,19 +36,29 @@ default_options = {
   "verbose": False
 }
 
+
 class OptionsError(Exception):
   def __init__(self, message):
     super(OptionsError, self).__init__(message)
 
+class BTRFSExecutionError(RuntimeError):
+    def __init__(self, ec, stdout, stderr):
+        super(BTRFSExecutionError, self).__init__("BTRFS Execution failed")
+        self.ec = ec
+        self.stdout = stdout
+        self.stderr = stderr
+
 class btrfs_util:
+  BTRFS_UTIL_EXE_NAME = "btrfs"
+
   def __init__(self, btrfs_exe = None):
     if btrfs_exe is not None:
       self.btrfs_exe = btrfs_exe
     else:
-      self.btrfs_exe = self.which("btrfs")
+      self.btrfs_exe = self.which(self.BTRFS_UTIL_EXE_NAME)
 
     if self.btrfs_exe is None:
-        raise Exception("Could not find btrfs executable")
+        raise RuntimeError("Could not find btrfs executable")
 
   def which(self, exename):
     # Find the an executable in the path
@@ -90,12 +100,12 @@ class btrfs_util:
       # Check the return code and the version string
       if ec != 0:
           # Problem executing the util
-          return None
+          raise BTRFSExecutionError(ec, stdout, stderr)
 
       v = ver_string.match(stdout)
       if v is None:
           # Malformed version string
-          return None
+          raise BTRFSExecutionError(ec, stdout, stderr)
 
       # This is the version extracted
       return v.groups()[0]
@@ -168,11 +178,22 @@ if __name__ == "__main__":
     sys.stderr.write(usage)
     sys.exit(1)
 
-  # Check that the given subvolume is a btrfs subvolume
-  btrfs = btrfs_util()
-  btrfs_ver = btrfs.btrfs_util_version()
-  if btrfs_ver is None:
-      logging.critical("Failed getting btrfs version")
-      sys.exit(1)
-  else:
+  try:
+      # Check that the given subvolume is a btrfs subvolume
+      btrfs = btrfs_util()
+      btrfs_ver = btrfs.btrfs_util_version()
       logging.debug("btrfs version: %s" % btrfs_ver)
+
+  except BTRFSExecutionError, e:
+      logging.critical(e.message)
+      logging.critical("  btrfs exited with %d" % e.ec)
+      logging.critical("  stdout:")
+      for l in e.stdout.split('\n'):
+          logging.critical("  | " + l)
+      logging.critical("  stderr:")
+      for l in e.stderr.split('\n'):
+          logging.critical("  | " + l)
+
+
+  except RuntimeError, e:
+      logging.critical(e.message)
