@@ -4,6 +4,7 @@ import getopt, sys
 import os, os.path
 import subprocess
 import logging, re
+from dateutil import parser
 
 usage = """
    btrfs-snaprotate [-l|--label=label] [-k|--keep=num] [-a|--after=command] [--dry-run]
@@ -60,6 +61,9 @@ class btrfs_util:
     if self.btrfs_exe is None:
         raise RuntimeError("Could not find btrfs executable")
 
+    # Used to decode "subvolume show" command results
+    self.show_regex = re.compile(r"([a-zA-Z ()]+):\s*([^\s].*)")
+
   def which(self, exename):
     # Find the an executable in the path
     for path in os.environ["PATH"].split(os.pathsep):
@@ -82,13 +86,52 @@ class btrfs_util:
     return (btrfs_proc.returncode, stdout, stderr)
 
   def create_snapshot(self, subvol, dest):
-    pass
+      ec, stdout, stderr = self.exec_btrfs_util(['subvolume', 'snapshot', subvol, dest])
+      if ec != 0:
+          # Problem executing the util
+          raise BTRFSExecutionError(ec, stdout, stderr)
 
   def delete_snapshot(self, snapname):
-    pass
+      ec, stdout, stderr = self.exec_btrfs_util(['subvolume', 'delete', 'snapname'])
+      if ec != 0:
+          # Problem executing the util
+          raise BTRFSExecutionError(ec, stdout, stderr)
 
-  def validate_is_btrfs(self, dir):
-    pass
+  def list_subvolumes(self, pathname):
+    ec, stdout, stderr = self.exec_btrfs_util(['subvolume', 'list', pathname])
+    if (ec != 0):
+          # Problem executing the util
+          raise BTRFSExecutionError(ec, stdout, stderr)
+
+    subvols = []
+    for l in stdout.split('\n'):
+        # The subvolume path is the 9th field
+        fss = l.split(' ')
+        if ((len(fss) >= 9) and (fss[7] == 'path')):
+            subvols.append(fss[8])
+
+    return subvols
+
+  def show_subvolume(self, pathname):
+    ec, stdout, stderr = self.exec_btrfs_util(['subvolume', 'show', pathname])
+    if (ec != 0):
+          # Problem executing the util
+          raise BTRFSExecutionError(ec, stdout, stderr)
+
+    # Convert the command output into key-data pairs
+    info = {}
+    for l in stdout.split('\n'):
+        m = self.show_regex.match(l.strip())
+        if m is not None:
+            key = m.groups()[0]
+            value = m.groups()[1]
+            info[key] = value
+
+    return info
+
+  def is_btrfs(self, pathname):
+    ec, stdout, stderr = self.exec_btrfs_util(['subvolume', 'list', pathname])
+    return (ec == 0)
 
   def btrfs_util_version(self):
       # Exepect a return string looking like this
@@ -179,10 +222,55 @@ if __name__ == "__main__":
     sys.exit(1)
 
   try:
-      # Check that the given subvolume is a btrfs subvolume
+      # Read btrfs version
       btrfs = btrfs_util()
       btrfs_ver = btrfs.btrfs_util_version()
       logging.debug("btrfs version: %s" % btrfs_ver)
+
+      # Check that the given subvolume is a btrfs subvolume
+      if (not btrfs.is_btrfs(options["subvolume"])):
+          logging.error("Directory %s is not a btrfs subvolume" % options["subvolume"])
+          sys.exit(1)
+      else:
+          logging.debug("Directory %s is a btrfs volume")
+
+      # Check that the target direcotry exists, or create it
+      target_dir = os.path.join(options["subvolume"], options["target"])
+      logging.debug("Target directory: " + target_dir)
+      if (not os.path.isdir(target_dir)):
+          logging.debug("Target directory does not exist, trying to create")
+          try:
+              os.mkdir(target_dir)
+          except OSError, e:
+              logging.error("Target directory creation failed: [%d] %s" % (e.errno, e.strerror))
+              sys.exit(1)
+
+       # Create the snapshot
+      logging.info("Creating snapshot of %s" % options["subvolume"])
+      #btrfs.create_snapshot(options["subvolume"], target_dir)
+
+      # List all the snapshots under the target directory
+      all_subvolumes = btrfs.list_subvolumes(options["subvolume"])
+      # Filter only those who are under the target firectory
+      subvolumes = filter(lambda p: p.startswith(options['target']), all_subvolumes)
+      # Retrieve the creation time of each snapshot
+      subvolume_time = []
+      for sbv in subvolumes:
+          info = btrfs.show_subvolume(os.path.join(options["subvolume"], sbv))
+          logging.debug('Found subvolume %s with creation time %s' % (sbv, info['Creation time']))
+          ctm = parser.parse(info['Creation time'])
+          # Convert to linear time
+          ltm = ctm.toordinal() + ((1.0/24)*ctm.hour) + ((1.0/(24*60)*ctm.minute)) + ((1.0/(24*60*60)*ctm.second))
+          subvolume_time.append((sbv, ltm))
+
+      # Sort the subvolume by acending creation time
+      sbvs = sorted(subvolume_time, key=lambda item: item[1])
+      print sbvs
+
+
+
+      # Delete the oldest ones
+
 
   except BTRFSExecutionError, e:
       logging.critical(e.message)
