@@ -5,6 +5,7 @@ import os, os.path
 import subprocess
 import logging, re
 from dateutil import parser
+import time
 
 usage = """
    btrfs-snaprotate [-l|--label=label] [-k|--keep=num] [-a|--after=command] [--dry-run]
@@ -36,6 +37,9 @@ default_options = {
   "subvolume": None,
   "verbose": False
 }
+
+# Regular expression used to check the label validity
+label_rx = re.compile(r"[a-zA-Z][a-zA-Z0-9_\-]*$")
 
 
 class OptionsError(Exception):
@@ -153,6 +157,9 @@ class btrfs_util:
       # This is the version extracted
       return v.groups()[0]
 
+##
+## Utility Functions
+##
 
 def parse_command_line(args):
   short_options = "l:k:a:t:v"
@@ -167,7 +174,9 @@ def parse_command_line(args):
   options = default_options.copy()
   for op, value in opts:
     if op in ("-l", "--label"):
-	options["label"] = value
+        if (label_rx.match(value) is None):
+            raise OptionsError("Invalid label")
+        options["label"] = value
 
     elif op in ("-k", "--keep"):
       try:
@@ -207,6 +216,10 @@ def parse_command_line(args):
 
   return options
 
+def snapshot_filename(target, label):
+    now = time.strftime("%Y-%m-%d_%H:%M:%S")
+    return os.path.join(target, label + '_' + now)
+
 #####
 ##### Main
 #####
@@ -220,6 +233,14 @@ if __name__ == "__main__":
     logging.critical(str(err))
     sys.stderr.write(usage)
     sys.exit(1)
+
+  # If no label was specified, determine it from the target path
+  if options["label"] is None:
+      ll = os.path.split(options["subvolume"].rstrip("/"))[1]
+      if ll == '':
+          ll = 'root'
+
+      options["label"] = ll
 
   try:
       # Read btrfs version
@@ -247,12 +268,13 @@ if __name__ == "__main__":
 
        # Create the snapshot
       logging.info("Creating snapshot of %s" % options["subvolume"])
-      #btrfs.create_snapshot(options["subvolume"], target_dir)
+      btrfs.create_snapshot(options["subvolume"], snapshot_filename(target_dir, options["label"]))
 
       # List all the snapshots under the target directory
       all_subvolumes = btrfs.list_subvolumes(options["subvolume"])
-      # Filter only those who are under the target firectory
-      subvolumes = filter(lambda p: p.startswith(options['target']), all_subvolumes)
+      # Filter only those who are under the target firectory and their name starts
+      # with out label
+      subvolumes = filter(lambda p: p.startswith(options['target']+'/'+options['label']), all_subvolumes)
       # Retrieve the creation time of each snapshot
       subvolume_time = []
       for sbv in subvolumes:
@@ -265,7 +287,14 @@ if __name__ == "__main__":
 
       # Sort the subvolume by acending creation time
       sbvs = sorted(subvolume_time, key=lambda item: item[1])
-      print sbvs
+
+      # Keep only "keep" ones
+      if len(sbvs) > options["keep"]:
+          sbv_delete = map(lambda m: m[0], sbvs[0:-options["keep"]])
+
+          for sbv in sbv_delete:
+          print sb_delete
+
 
 
 
