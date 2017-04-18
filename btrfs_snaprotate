@@ -180,16 +180,12 @@ if __name__ == "__main__":
       sbvs = sorted(subvolume_time, key=lambda item: item[1])
 
       # Keep only "keep" ones
-      if len(sbvs) > options["keep"]:
-          sbv_delete = map(lambda m: m[0], sbvs[0:-options["keep"]])
+      keep = options["keep"]
+      if len(sbvs) > keep:
+          sbv_delete = map(lambda m: m[0], sbvs[0:-keep])
 
           for sbv in sbv_delete:
-            print sbv
-
-
-
-
-      # Delete the oldest ones
+            print os.path.join(target, sbv)
 
 
   except BTRFSExecutionError, e:
