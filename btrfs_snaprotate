@@ -101,7 +101,7 @@ def parse_command_line(args):
   logging.debug("Exec arguments: Label = %s" % options["label"])
   logging.debug("Exec arguments: Keep = %d" % options["keep"])
   if options["after"] is not None:
-      logging.debug("Exec arguments: Keep = %s" % options["after"])
+      logging.debug("Exec arguments: After = %s" % options["after"])
   logging.debug("Exec arguments: Dry Run = %s" % ("Yes" if options["dry"] else "No"))
   logging.debug("Exec arguments: Target = %s" % options["target"])
 
@@ -185,7 +185,9 @@ if __name__ == "__main__":
           sbv_delete = map(lambda m: m[0], sbvs[0:-keep])
 
           for sbv in sbv_delete:
-            print os.path.join(target, sbv)
+            ds = os.path.join(options["subvolume"], sbv)
+            logging.info("Deleting old snapshot: " + ds)
+            btrfs.delete_snapshot(ds)
 
 
   except BTRFSExecutionError, e:

@@ -51,7 +51,7 @@ class BTRFSUtil:
           raise BTRFSExecutionError(ec, stdout, stderr)
 
   def delete_snapshot(self, snapname):
-      ec, stdout, stderr = self.exec_btrfs_util(['subvolume', 'delete', 'snapname'])
+      ec, stdout, stderr = self.exec_btrfs_util(['subvolume', 'delete', snapname])
       if ec != 0:
           # Problem executing the util
           raise BTRFSExecutionError(ec, stdout, stderr)
