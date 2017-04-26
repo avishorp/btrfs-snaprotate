@@ -159,7 +159,8 @@ if __name__ == "__main__":
 
        # Create the snapshot
       logging.info("Creating snapshot of %s" % options["subvolume"])
-      btrfs.create_snapshot(options["subvolume"], snapshot_filename(target_dir, options["label"]))
+      new_snapshot_filename = snapshot_filename(target_dir, options["label"])
+      btrfs.create_snapshot(options["subvolume"], new_snapshot_filename)
 
       # List all the snapshots under the target directory
       all_subvolumes = btrfs.list_subvolumes(options["subvolume"])
@@ -188,6 +189,23 @@ if __name__ == "__main__":
             ds = os.path.join(options["subvolume"], sbv)
             logging.info("Deleting old snapshot: " + ds)
             btrfs.delete_snapshot(ds)
+
+      # Finally, if an "after" task is defined, run it
+      if options["after"] is not None:
+        cmd = options["after"]
+        env = {
+            "SNAPSUBVOL": options['subvolume'],
+            "SNAPTARGET": options['target'],
+            "SNAPRECENT": new_snapshot_filename
+        }
+        print env
+
+        # Invoke the "after" command
+        logging.info("Invoking post-snapshot process")
+        proc = subprocess.Popen(options["after"], shell=True, env=env, cwd=options['subvolume'])
+        rc = proc.wait()
+        logging.info("Post-snapshot process returned with %d" % rc)
+
 
 
   except BTRFSExecutionError, e:

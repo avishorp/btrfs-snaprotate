@@ -50,3 +50,4 @@ ls /testdisk/s/.snapshot
 
 # Cleanup
 btrfs subvolume list -o /testdisk/s | awk -v T=$BASE '{ print T "/" $9 }'  | xargs btrfs subvolume delete
+btrfs subvolume delete /testdisk/s
